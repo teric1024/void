@@ -437,6 +437,12 @@ export const SettingsForProvider = ({ providerName, showProviderTitle, showProvi
 
 	const { title: providerTitle } = displayInfoOfProviderName(providerName)
 
+	const [additionalConfigs, setAdditionalConfigs] = useState([''])
+
+	const addConfigBox = () => {
+		setAdditionalConfigs([...additionalConfigs, ''])
+	}
+
 	return <div>
 
 		<div className='flex items-center w-full gap-4'>
@@ -454,18 +460,27 @@ export const SettingsForProvider = ({ providerName, showProviderTitle, showProvi
 			/> */}
 		</div>
 
-		<div className='px-0'>
-			{/* settings besides models (e.g. api key) */}
-			{settingNames.map((settingName, i) => {
-				return <ProviderSetting key={settingName} providerName={providerName} settingName={settingName} />
-			})}
+		{additionalConfigs.map((_, index) => (
+			<div className='px-0'>
+				{/* settings besides models (e.g. api key) */}
+				{settingNames.map((settingName, i) => {
+					return <ProviderSetting key={settingName} providerName={providerName} settingName={settingName} />
+				})}
 
-			{showProviderSuggestions && needsModel ?
-				providerName === 'ollama' ?
-					<WarningBox text={`Please install an Ollama model. We'll auto-detect it.`} />
-					: <WarningBox text={`Please add a model for ${providerTitle} (Models section).`} />
-				: null}
-		</div>
+				{showProviderSuggestions && needsModel ?
+					providerName === 'ollama' ?
+						<WarningBox text={`Please install an Ollama model. We'll auto-detect it.`} />
+						: <WarningBox text={`Please add a model for ${providerTitle} (Models section).`} />
+					: null}
+			</div>
+		))}
+
+		<button
+			className='mt-2 px-3 py-1 bg-blue-500 text-white rounded-sm hover:bg-blue-600'
+			onClick={addConfigBox}
+		>
+			Add Configuration
+		</button>
 	</div >
 }
 
