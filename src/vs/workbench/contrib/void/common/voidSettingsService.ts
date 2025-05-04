@@ -24,7 +24,8 @@ export type ModelOption = { name: string, selection: ModelSelection }
 type SetSettingOfProviderFn = <S extends SettingName>(
 	providerName: ProviderName,
 	settingName: S,
-	newVal: SettingsOfProvider[ProviderName][S extends keyof SettingsOfProvider[ProviderName] ? S : never],
+	configIndex: number,
+	newVal: SettingsOfProvider[ProviderName][number][S extends keyof SettingsOfProvider[ProviderName][number] ? S : never],
 ) => Promise<void>;
 
 type SetModelSelectionOfFeatureFn = <K extends FeatureName>(
@@ -107,18 +108,20 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>) =
 
 	// recompute _didFillInProviderSettings
 	for (const providerName of providerNames) {
-		const settingsAtProvider = newSettingsOfProvider[providerName]
+		const settingsAtProviderArray = newSettingsOfProvider[providerName]
 
-		const didFillInProviderSettings = Object.keys(defaultProviderSettings[providerName]).every(key => !!settingsAtProvider[key as keyof typeof settingsAtProvider])
+		for (const settingsAtProvider of settingsAtProviderArray) {
+			const didFillInProviderSettings = Object.keys(defaultProviderSettings[providerName]).every(key => !!settingsAtProvider[key as keyof typeof settingsAtProvider])
 
-		if (didFillInProviderSettings === settingsAtProvider._didFillInProviderSettings) continue
+			if (didFillInProviderSettings === settingsAtProvider._didFillInProviderSettings) continue
 
-		newSettingsOfProvider = {
-			...newSettingsOfProvider,
-			[providerName]: {
-				...settingsAtProvider,
-				_didFillInProviderSettings: didFillInProviderSettings,
-			},
+			newSettingsOfProvider = {
+				...newSettingsOfProvider,
+				[providerName]: settingsAtProviderArray.map(settings => settings === settingsAtProvider ? {
+					...settings,
+					_didFillInProviderSettings: didFillInProviderSettings,
+				} : settings),
+			};
 		}
 	}
 
@@ -126,10 +129,13 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>) =
 	let newModelOptions: ModelOption[] = []
 	for (const providerName of providerNames) {
 		const providerTitle = providerName // displayInfoOfProviderName(providerName).title.toLowerCase() // looks better lowercase, best practice to not use raw providerName
-		if (!newSettingsOfProvider[providerName]._didFillInProviderSettings) continue // if disabled, don't display model options
-		for (const { modelName, isHidden } of newSettingsOfProvider[providerName].models) {
-			if (isHidden) continue
-			newModelOptions.push({ name: `${modelName} (${providerTitle})`, selection: { providerName, modelName } })
+		for (const settingsAtProvider of newSettingsOfProvider[providerName]) {
+			if (!settingsAtProvider._didFillInProviderSettings) continue // if disabled, don't display model options
+			for (const { modelName, isHidden } of settingsAtProvider.models) {
+				if (isHidden) continue
+				// BUG model options cannot recognize index in settingsOfProvider
+				newModelOptions.push({ name: `${modelName} (${providerTitle})`, selection: { providerName, modelName } })
+			}
 		}
 	}
 
@@ -247,18 +253,23 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		this._storageService.store(VOID_SETTINGS_STORAGE_KEY, encryptedState, StorageScope.APPLICATION, StorageTarget.USER);
 	}
 
-	setSettingOfProvider: SetSettingOfProviderFn = async (providerName, settingName, newVal) => {
+	setSettingOfProvider: SetSettingOfProviderFn = async (providerName, settingName, configIndex, newVal) => {
 
 		const newModelSelectionOfFeature = this.state.modelSelectionOfFeature
 
 		const newOptionsOfModelSelection = this.state.optionsOfModelSelection
 
-		const newSettingsOfProvider: SettingsOfProvider = {
+		const newSettingsOfProvider = {
 			...this.state.settingsOfProvider,
-			[providerName]: {
-				...this.state.settingsOfProvider[providerName],
-				[settingName]: newVal,
-			}
+			[providerName]: this.state.settingsOfProvider[providerName].map((settingsAtProvider, index) => {
+				if (index === configIndex) {
+					return {
+						...settingsAtProvider,
+						[settingName]: newVal,
+					};
+				}
+				return settingsAtProvider
+			})
 		}
 
 		const newGlobalSettings = this.state.globalSettings
@@ -350,62 +361,71 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 
 	setAutodetectedModels(providerName: ProviderName, autodetectedModelNames: string[], logging: object) {
 
-		const { models } = this.state.settingsOfProvider[providerName]
+		// TODO by default, only change the first settingsAtProvider
+		const defaultSettingIndex = 0
+		const { models } = this.state.settingsOfProvider[providerName][defaultSettingIndex]
 		const oldModelNames = models.map(m => m.modelName)
 
 		const newModels = _updatedModelsAfterDefaultModelsChange(autodetectedModelNames, { existingModels: models })
-		this.setSettingOfProvider(providerName, 'models', newModels)
+		this.setSettingOfProvider(providerName, 'models', defaultSettingIndex, newModels)
 
 		// if the models changed, log it
 		const new_names = newModels.map(m => m.modelName)
 		if (!(oldModelNames.length === new_names.length
 			&& oldModelNames.every((_, i) => oldModelNames[i] === new_names[i]))
 		) {
+			// BUG the logging cannot recognize the index in settingsOfProvider
 			this._metricsService.capture('Autodetect Models', { providerName, newModels: newModels, ...logging })
 		}
 	}
 	toggleModelHidden(providerName: ProviderName, modelName: string) {
 
+		this.state.settingsOfProvider[providerName].forEach((settingsAtProvider, index) => {
+			const { models } = settingsAtProvider
+			const modelIdx = models.findIndex(m => m.modelName === modelName)
+			if (modelIdx === -1) return
+			const newIsHidden = !models[modelIdx].isHidden
+			const newModels: VoidStatefulModelInfo[] = [
+				...models.slice(0, modelIdx),
+				{ ...models[modelIdx], isHidden: newIsHidden },
+				...models.slice(modelIdx + 1, Infinity)
+			]
+			this.setSettingOfProvider(providerName, 'models', index, newModels)
 
-		const { models } = this.state.settingsOfProvider[providerName]
-		const modelIdx = models.findIndex(m => m.modelName === modelName)
-		if (modelIdx === -1) return
-		const newIsHidden = !models[modelIdx].isHidden
-		const newModels: VoidStatefulModelInfo[] = [
-			...models.slice(0, modelIdx),
-			{ ...models[modelIdx], isHidden: newIsHidden },
-			...models.slice(modelIdx + 1, Infinity)
-		]
-		this.setSettingOfProvider(providerName, 'models', newModels)
-
-		this._metricsService.capture('Toggle Model Hidden', { providerName, modelName, newIsHidden })
-
+			// BUG the logging cannot recognize the index in settingsOfProvider
+			this._metricsService.capture('Toggle Model Hidden', { providerName, modelName, newIsHidden })
+		})
 	}
 	addModel(providerName: ProviderName, modelName: string) {
-		const { models } = this.state.settingsOfProvider[providerName]
-		const existingIdx = models.findIndex(m => m.modelName === modelName)
-		if (existingIdx !== -1) return // if exists, do nothing
-		const newModels = [
-			...models,
-			{ modelName, isDefault: false, isHidden: false }
-		]
-		this.setSettingOfProvider(providerName, 'models', newModels)
+		this.state.settingsOfProvider[providerName].map((settingsAtProvider, index) => {
+			const { models } = settingsAtProvider
+			const existingIdx = models.findIndex(m => m.modelName === modelName)
+			if (existingIdx !== -1) return // if exists, do nothing
+			const newModels = [
+				...models,
+				{ modelName, isDefault: false, isHidden: false }
+			]
+			this.setSettingOfProvider(providerName, 'models', index, newModels)
 
-		this._metricsService.capture('Add Model', { providerName, modelName })
-
+			// BUG the logging cannot recognize the index in settingsOfProvider
+			this._metricsService.capture('Add Model', { providerName, modelName })
+		})
 	}
 	deleteModel(providerName: ProviderName, modelName: string): boolean {
-		const { models } = this.state.settingsOfProvider[providerName]
-		const delIdx = models.findIndex(m => m.modelName === modelName)
-		if (delIdx === -1) return false
-		const newModels = [
-			...models.slice(0, delIdx), // delete the idx
-			...models.slice(delIdx + 1, Infinity)
-		]
-		this.setSettingOfProvider(providerName, 'models', newModels)
+		for (let index = 0; index < this.state.settingsOfProvider[providerName].length; index++) {
+			const settingsAtProvider = this.state.settingsOfProvider[providerName][index]
+			const { models } = settingsAtProvider
+			const delIdx = models.findIndex(m => m.modelName === modelName)
+			if (delIdx === -1) return false
+			const newModels = [
+				...models.slice(0, delIdx), // delete the idx
+				...models.slice(delIdx + 1, Infinity)
+			]
+			this.setSettingOfProvider(providerName, 'models', index, newModels)
 
-		this._metricsService.capture('Delete Model', { providerName, modelName })
-
+			// BUG the logging cannot recognize the index in settingsOfProvider
+			this._metricsService.capture('Delete Model', { providerName, modelName })
+		}
 		return true
 	}
 

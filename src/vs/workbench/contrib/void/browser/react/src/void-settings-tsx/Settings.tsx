@@ -84,7 +84,8 @@ const RefreshableModels = () => {
 
 
 	const buttons = refreshableProviderNames.map(providerName => {
-		if (!settingsState.settingsOfProvider[providerName]._didFillInProviderSettings) return null
+		const settingsAtProvider = settingsState.settingsOfProvider[providerName]
+		if (!settingsAtProvider.some(setting => setting._didFillInProviderSettings === true)) return null
 		return <RefreshModelButton key={providerName} providerName={providerName} />
 	})
 
@@ -172,7 +173,7 @@ export const AddModelInputBox = ({ providerName: permanentProviderName, classNam
 	const [modelName, setModelName] = useState<string>('')
 	const [errorString, setErrorString] = useState('')
 
-	const numModels = settingsState.settingsOfProvider[providerName].models.length
+	const numModels = settingsState.settingsOfProvider[providerName].reduce((acc, settingsAtProvider) => acc + settingsAtProvider.models.length, 0)
 
 	if (showCheckmark) {
 		return <AnimatedCheckmarkButton text='Added' className={`bg-[#0e70c0] text-white px-3 py-1 rounded-sm ${className}`} />
@@ -235,7 +236,9 @@ export const AddModelInputBox = ({ providerName: permanentProviderName, classNam
 						return
 					}
 					// if model already exists here
-					if (settingsState.settingsOfProvider[providerName].models.find(m => m.modelName === modelName)) {
+					if (settingsState.settingsOfProvider[providerName].some(settingsAtProvider =>
+						settingsAtProvider.models.find(m => m.modelName === modelName))
+					) {
 						// setErrorString(`This model already exists under ${providerName}.`)
 						setErrorString(`This model already exists.`)
 						return
@@ -276,7 +279,9 @@ export const ModelDump = () => {
 	for (let providerName of providerNames) {
 		const providerSettings = settingsState.settingsOfProvider[providerName]
 		// if (!providerSettings.enabled) continue
-		modelDump.push(...providerSettings.models.map(model => ({ ...model, providerName, providerEnabled: !!providerSettings._didFillInProviderSettings })))
+		providerSettings.map(settingsAtProvider => {
+			modelDump.push(...settingsAtProvider.models.map(model => ({ ...model, providerName, providerEnabled: !!settingsAtProvider._didFillInProviderSettings })));
+		});
 	}
 
 	// sort by hidden
@@ -345,7 +350,7 @@ export const ModelDump = () => {
 
 // providers
 
-const ProviderSetting = ({ providerName, settingName }: { providerName: ProviderName, settingName: SettingName }) => {
+const ProviderSetting = ({ providerName, settingName, configIndex }: { providerName: ProviderName, settingName: SettingName, configIndex: number }) => {
 
 	const { title: settingTitle, placeholder, isPasswordField, subTextMd } = displayInfoOfSettingName(providerName, settingName)
 
@@ -353,7 +358,7 @@ const ProviderSetting = ({ providerName, settingName }: { providerName: Provider
 	const voidSettingsService = accessor.get('IVoidSettingsService')
 	const settingsState = useSettingsState()
 
-	const settingValue = settingsState.settingsOfProvider[providerName][settingName] as string // this should always be a string in this component
+	const settingValue = settingsState.settingsOfProvider[providerName][configIndex][settingName] as string // this should always be a string in this component
 	if (typeof settingValue !== 'string') {
 		console.log('Error: Provider setting had a non-string value.')
 		return
@@ -364,7 +369,7 @@ const ProviderSetting = ({ providerName, settingName }: { providerName: Provider
 			<VoidSimpleInputBox
 				value={settingValue}
 				onChangeValue={useCallback((newVal) => {
-					voidSettingsService.setSettingOfProvider(providerName, settingName, newVal)
+					voidSettingsService.setSettingOfProvider(providerName, settingName, configIndex, newVal)
 				}, [voidSettingsService, providerName, settingName])}
 				// placeholder={`${providerTitle} ${settingTitle} (${placeholder})`}
 				placeholder={`${settingTitle} (${placeholder})`}
@@ -460,11 +465,11 @@ export const SettingsForProvider = ({ providerName, showProviderTitle, showProvi
 			/> */}
 		</div>
 
-		{additionalConfigs.map((_, index) => (
+		{additionalConfigs.map((_, configIndex) => (
 			<div className='px-0'>
 				{/* settings besides models (e.g. api key) */}
 				{settingNames.map((settingName, i) => {
-					return <ProviderSetting key={settingName} providerName={providerName} settingName={settingName} />
+					return <ProviderSetting key={settingName} providerName={providerName} settingName={settingName} configIndex={configIndex} />
 				})}
 
 				{showProviderSuggestions && needsModel ?

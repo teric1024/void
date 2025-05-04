@@ -1,4 +1,3 @@
-
 /*--------------------------------------------------------------------------------------
  *  Copyright 2025 Glass Devtools, Inc. All rights reserved.
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
@@ -46,7 +45,7 @@ export type SettingsAtProvider<providerName extends ProviderName> = CustomProvid
 
 // part of state
 export type SettingsOfProvider = {
-	[providerName in ProviderName]: SettingsAtProvider<providerName>
+	[providerName in ProviderName]: SettingsAtProvider<providerName>[]
 }
 
 
@@ -204,66 +203,66 @@ const modelInfoOfDefaultModelNames = (defaultModelNames: string[]): { models: Vo
 
 // used when waiting and for a type reference
 export const defaultSettingsOfProvider: SettingsOfProvider = {
-	anthropic: {
+	anthropic: [{
 		...defaultCustomSettings,
 		...defaultProviderSettings.anthropic,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.anthropic),
 		_didFillInProviderSettings: undefined,
-	},
-	openAI: {
+	}],
+	openAI: [{
 		...defaultCustomSettings,
 		...defaultProviderSettings.openAI,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.openAI),
 		_didFillInProviderSettings: undefined,
-	},
-	deepseek: {
+	}],
+	deepseek: [{
 		...defaultCustomSettings,
 		...defaultProviderSettings.deepseek,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.deepseek),
 		_didFillInProviderSettings: undefined,
-	},
-	gemini: {
+	}],
+	gemini: [{
 		...defaultCustomSettings,
 		...defaultProviderSettings.gemini,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.gemini),
 		_didFillInProviderSettings: undefined,
-	},
-	xAI: {
+	}],
+	xAI: [{
 		...defaultCustomSettings,
 		...defaultProviderSettings.xAI,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.xAI),
 		_didFillInProviderSettings: undefined,
-	},
-	groq: { // aggregator
+	}],
+	groq: [{ // aggregator
 		...defaultCustomSettings,
 		...defaultProviderSettings.groq,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.groq),
 		_didFillInProviderSettings: undefined,
-	},
-	openRouter: { // aggregator
+	}],
+	openRouter: [{ // aggregator
 		...defaultCustomSettings,
 		...defaultProviderSettings.openRouter,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.openRouter),
 		_didFillInProviderSettings: undefined,
-	},
-	openAICompatible: { // aggregator
+	}],
+	openAICompatible: [{ // aggregator
 		...defaultCustomSettings,
 		...defaultProviderSettings.openAICompatible,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.openAICompatible),
 		_didFillInProviderSettings: undefined,
-	},
-	ollama: { // aggregator
+	}],
+	ollama: [{ // aggregator
 		...defaultCustomSettings,
 		...defaultProviderSettings.ollama,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.ollama),
 		_didFillInProviderSettings: undefined,
-	},
-	vLLM: { // aggregator
+	}],
+	vLLM: [{ // aggregator
 		...defaultCustomSettings,
 		...defaultProviderSettings.vLLM,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.vLLM),
 		_didFillInProviderSettings: undefined,
-	},
+	}],
 }
 
 
@@ -307,16 +306,20 @@ export const hasDownloadButtonsOnModelsProviderNames = ['ollama'] as const satis
 
 // use this in isFeatuerNameDissbled
 export const isProviderNameDisabled = (providerName: ProviderName, settingsState: VoidSettingsState) => {
+	const settingsAtProviderArray = settingsState.settingsOfProvider[providerName];
 
-	const settingsAtProvider = settingsState.settingsOfProvider[providerName]
-	const isAutodetected = (refreshableProviderNames as string[]).includes(providerName)
-
-	const isDisabled = settingsAtProvider.models.length === 0
-	if (isDisabled) {
-		return isAutodetected ? 'providerNotAutoDetected' : (!settingsAtProvider._didFillInProviderSettings ? 'notFilledIn' : 'addModel')
+	if (settingsAtProviderArray.length === 0) {
+		return 'addConfiguration';
 	}
-	return false
-}
+
+	const isDisabled = settingsAtProviderArray.every(config => config.models.length === 0);
+	if (isDisabled) {
+		return 'addModel';
+	}
+
+	return false;
+};
+
 
 export const isFeatureNameDisabled = (featureName: FeatureName, settingsState: VoidSettingsState) => {
 	// if has a selected provider, check if it's enabled
@@ -328,11 +331,17 @@ export const isFeatureNameDisabled = (featureName: FeatureName, settingsState: V
 	}
 
 	// if there are any models they can turn on, tell them that
-	const canTurnOnAModel = !!providerNames.find(providerName => settingsState.settingsOfProvider[providerName].models.filter(m => m.isHidden).length !== 0)
+	const canTurnOnAModel = !!providerNames.find(providerName =>
+		settingsState.settingsOfProvider[providerName].filter(settingsAtProvider =>
+			settingsAtProvider.models.filter(model => model.isHidden).length !== 0
+		)
+	)
 	if (canTurnOnAModel) return 'needToEnableModel'
 
 	// if there are any providers filled in, then they just need to add a model
-	const anyFilledIn = !!providerNames.find(providerName => settingsState.settingsOfProvider[providerName]._didFillInProviderSettings)
+	const anyFilledIn = !!providerNames.find(providerName =>
+		settingsState.settingsOfProvider[providerName].filter(settingsAtProvider => settingsAtProvider._didFillInProviderSettings)
+	)
 	if (anyFilledIn) return 'addModel'
 
 	return 'addProvider'
